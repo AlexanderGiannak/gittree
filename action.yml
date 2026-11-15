@@ -12,7 +12,7 @@ inputs:
     description: Path of the SVG to write, relative to the repository root
     default: assets/tree.svg
   exclude:
-    description: Comma-separated languages that never get a limb. Leave empty for the default (markup and config such as HTML and CSS)
+    description: Comma-separated languages that never get a limb. Leave empty for the default (markup and config such as HTML and CSS), or "none" to give every language a limb
     default: ""
   commit:
     description: Commit and push the SVG when it changed ("true" or "false")
@@ -26,9 +26,9 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@v5
       with:
-        node-version: 20
+        node-version: 24
     - name: Grow the tree
       shell: bash
       env:

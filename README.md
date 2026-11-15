@@ -37,7 +37,7 @@ You need a profile repository: a public repo named exactly like your username, w
      grow:
        runs-on: ubuntu-latest
        steps:
-         - uses: actions/checkout@v4
+         - uses: actions/checkout@v5
          - uses: AlexanderGiannak/gittree@v1
    ```
 
@@ -86,7 +86,7 @@ All inputs are optional.
 | --- | --- | --- |
 | `username` | The repo owner | Whose activity grows the tree |
 | `output` | `assets/tree.svg` | Where the SVG is written |
-| `exclude` | Markup and config languages such as HTML, CSS and Dockerfile | Comma-separated languages that never get a limb. Setting this replaces the default list |
+| `exclude` | Markup and config languages such as HTML, CSS and Dockerfile | Comma-separated languages that never get a limb. Setting this replaces the default list; `none` excludes nothing |
 | `commit` | `true` | Commit and push the SVG when it changed. Set to `false` to handle the file yourself |
 | `commit-message` | `Grow tree [skip ci]` | Message for that commit |
 | `token` | The workflow's built-in token | Token used to read public activity |

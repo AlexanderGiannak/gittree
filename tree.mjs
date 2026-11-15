@@ -42,23 +42,37 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;',
 const DAY = 864e5;
 
 /* ---------------- fetch (GitHub GraphQL) ---------------- */
-async function gql(query, variables, token) {
-  const r = await fetch('https://api.github.com/graphql', { method: 'POST', headers: { Authorization: `bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': 'gittree' }, body: JSON.stringify({ query, variables }) });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || j.errors) throw new Error(`GitHub API ${r.status}: ${JSON.stringify(j.errors || j).slice(0, 600)}`);
-  return j.data;
+// GitHub's GraphQL API fails transiently now and then (5xx, or a 200 with "Something went wrong"), and can
+// rate-limit with 403/429; retry those with backoff so a scheduled run doesn't fail on a hiccup
+async function gql(query, variables, token, tries = 4) {
+  for (let attempt = 1; ; attempt++) {
+    let r, j = {};
+    try {
+      r = await fetch('https://api.github.com/graphql', { method: 'POST', headers: { Authorization: `bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': 'gittree' }, body: JSON.stringify({ query, variables }) });
+      j = await r.json().catch(() => ({}));
+    } catch (e) { if (attempt >= tries) throw e }
+    if (r && r.ok && !j.errors) return j.data;
+    const msg = r ? `GitHub API ${r.status}: ${JSON.stringify(j.errors || j).slice(0, 600)}` : 'network error';
+    const transient = !r || r.status >= 500 || r.status === 429 || (r.status === 403 && /rate limit/i.test(msg)) || /something went wrong|timeout|timed out/i.test(msg);
+    if (!transient || attempt >= tries) throw new Error(msg);
+    const wait = Math.min(60, Number(r?.headers.get('retry-after')) || 2 ** attempt * 2);
+    console.error(`${msg.slice(0, 160)}; retrying in ${wait}s (attempt ${attempt + 1} of ${tries})`);
+    await new Promise(res => setTimeout(res, wait * 1000));
+  }
 }
 async function fetchData(login, token) {
-  const Q_USER = `query($login:String!){user(login:$login){createdAt
+  const Q_USER = `query($login:String!){user(login:$login){login createdAt
     repositories(first:100,ownerAffiliations:[OWNER],privacy:PUBLIC,isFork:false,orderBy:{field:PUSHED_AT,direction:DESC}){nodes{
       name createdAt pushedAt stargazerCount primaryLanguage{name color}
       languages(first:10,orderBy:{field:SIZE,direction:DESC}){edges{size node{name color}}}}}
     pullRequests(states:[MERGED],first:100,orderBy:{field:CREATED_AT,direction:DESC}){nodes{mergedAt}}}}`;
+  // the yearly calls only need the calendar; per-repo commits are a heavier query, so it runs once for the last 90 days
   const Q_CAL = `query($login:String!,$from:DateTime!,$to:DateTime!){user(login:$login){contributionsCollection(from:$from,to:$to){
-    contributionCalendar{weeks{contributionDays{date contributionCount}}}
-    commitContributionsByRepository(maxRepositories:100){repository{name primaryLanguage{name}} contributions{totalCount}}}}}`;
-  const u = (await gql(Q_USER, { login }, token)).user;
-  if (!u) throw new Error(`GitHub user "${login}" not found`);
+    contributionCalendar{weeks{contributionDays{date contributionCount}}}}}}`;
+  const Q_RECENT = `query($login:String!,$from:DateTime!,$to:DateTime!){user(login:$login){contributionsCollection(from:$from,to:$to){
+    commitContributionsByRepository(maxRepositories:100){repository{name owner{login} primaryLanguage{name}} contributions{totalCount}}}}}`;
+  const u = (await gql(Q_USER, { login }, token).catch(e => { if (/NOT_FOUND/.test(e.message)) return {}; throw e })).user;
+  if (!u) throw new Error(`GitHub user "${login}" not found. Organizations can't grow a tree: set the "username" input (or --user) to a personal account`);
   const now = new Date(), today = now.toISOString().slice(0, 10), days = new Map();
   // contributionsCollection spans at most one year per call, so walk year by year since the account was created
   for (let y = new Date(u.createdAt).getUTCFullYear(); y <= now.getUTCFullYear(); y++) {
@@ -66,12 +80,14 @@ async function fetchData(login, token) {
     const cc = (await gql(Q_CAL, { login, from: from.toISOString(), to: to.toISOString() }, token)).user.contributionsCollection;
     for (const w of cc.contributionCalendar.weeks) for (const d of w.contributionDays) if (d.date <= today) days.set(d.date, d.contributionCount);
   }
-  const recent = (await gql(Q_CAL, { login, from: new Date(now - 90 * DAY).toISOString(), to: now.toISOString() }, token)).user.contributionsCollection;
+  const recent = (await gql(Q_RECENT, { login, from: new Date(now - 90 * DAY).toISOString(), to: now.toISOString() }, token)).user.contributionsCollection;
+  // leaves are matched to your repos by name, so drop commits to other people's repos (e.g. someone else's "dotfiles")
+  const own = recent.commitContributionsByRepository.filter(x => x.repository.owner.login.toLowerCase() === u.login.toLowerCase());
   return {
-    login, createdAt: u.createdAt, fetchedAt: now.toISOString(),
+    login: u.login, createdAt: u.createdAt, fetchedAt: now.toISOString(),
     calendar: [...days].sort((a, b) => a[0] < b[0] ? -1 : 1).map(([date, count]) => ({ date, count })),
     repos: u.repositories.nodes.map(r => ({ name: r.name, createdAt: r.createdAt, pushedAt: r.pushedAt, stars: r.stargazerCount, primary: r.primaryLanguage?.name || null, languages: r.languages.edges.map(e => ({ name: e.node.name, color: e.node.color || '#7a9a6a', bytes: e.size })) })),
-    recentCommits: recent.commitContributionsByRepository.map(x => ({ repo: x.repository.name, lang: x.repository.primaryLanguage?.name || null, commits: x.contributions.totalCount })),
+    recentCommits: own.map(x => ({ repo: x.repository.name, lang: x.repository.primaryLanguage?.name || null, commits: x.contributions.totalCount })),
     mergedPRs: u.pullRequests.nodes.map(p => p.mergedAt).filter(Boolean)
   };
 }
@@ -363,9 +379,11 @@ async function main() {
   }
   if (opt['save-data']) { mkdirSync(dirname(opt['save-data']), { recursive: true }); writeFileSync(opt['save-data'], JSON.stringify(data)) }
   // pinned to noon UTC of the day, so repeated runs on the same day produce the same image unless the data changed
-  const asOf = new Date((opt.date || new Date().toISOString().slice(0, 10)) + 'T12:00:00Z');
-  const seasonDate = opt['season-date'] ? new Date(opt['season-date'] + 'T12:00:00Z') : undefined;
-  const exclude = typeof opt.exclude === 'string' ? opt.exclude.split(',').map(s => s.trim()).filter(Boolean) : opt.exclude === true ? [] : undefined;
+  const day = (flag, v) => { const d = new Date(v + 'T12:00:00Z'); if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || isNaN(d) || d.toISOString().slice(0, 10) !== v) throw new Error(`--${flag} must be a date like 2026-05-01, got "${v}"`); return d };
+  const asOf = day('date', typeof opt.date === 'string' ? opt.date : new Date().toISOString().slice(0, 10));
+  const seasonDate = typeof opt['season-date'] === 'string' ? day('season-date', opt['season-date']) : undefined;
+  // "none" (or a bare --exclude) lets every language grow a limb
+  const exclude = typeof opt.exclude === 'string' && opt.exclude.trim().toLowerCase() !== 'none' ? opt.exclude.split(',').map(s => s.trim()).filter(Boolean) : opt.exclude ? [] : undefined;
   const { svg, metrics } = render(data, { asOf, seasonDate, exclude });
   const outPath = opt.out || 'assets/tree.svg';
   mkdirSync(dirname(outPath), { recursive: true }); writeFileSync(outPath, svg);
