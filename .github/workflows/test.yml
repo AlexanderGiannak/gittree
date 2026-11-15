@@ -1,0 +1,26 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the action against live data without committing
+        uses: ./
+        with:
+          output: out/tree.svg
+          commit: "false"
+      - name: Check the result is an SVG
+        run: |
+          test -s out/tree.svg
+          head -c 200 out/tree.svg | grep -q "<svg"
+          ls -l out/tree.svg

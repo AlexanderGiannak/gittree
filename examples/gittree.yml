@@ -1,0 +1,21 @@
+# Copy to .github/workflows/gittree.yml in your profile repository (the one named after your username).
+name: Grow GitTree
+
+on:
+  schedule:
+    - cron: "8,23,38,53 * * * *" # every 15 minutes; use "17 9 * * *" for once a day
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gittree
+  cancel-in-progress: false
+
+jobs:
+  grow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: AlexanderGiannak/gittree@v1

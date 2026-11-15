@@ -1,0 +1,55 @@
+name: GitTree
+description: Grow an animated SVG tree from a GitHub user's public activity, for a profile README
+author: AlexanderGiannak
+branding:
+  icon: feather
+  color: green
+inputs:
+  username:
+    description: GitHub login whose activity grows the tree
+    default: ${{ github.repository_owner }}
+  output:
+    description: Path of the SVG to write, relative to the repository root
+    default: assets/tree.svg
+  exclude:
+    description: Comma-separated languages that never get a limb. Leave empty for the default (markup and config such as HTML and CSS)
+    default: ""
+  commit:
+    description: Commit and push the SVG when it changed ("true" or "false")
+    default: "true"
+  commit-message:
+    description: Commit message used when the tree changed
+    default: "Grow tree [skip ci]"
+  token:
+    description: Token used to read public activity. The built-in token is enough
+    default: ${{ github.token }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 20
+    - name: Grow the tree
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+        GT_USER: ${{ inputs.username }}
+        GT_OUT: ${{ inputs.output }}
+        GT_EXCLUDE: ${{ inputs.exclude }}
+      run: |
+        args=(--user "$GT_USER" --out "$GT_OUT")
+        if [ -n "$GT_EXCLUDE" ]; then args+=(--exclude "$GT_EXCLUDE"); fi
+        node "$GITHUB_ACTION_PATH/tree.mjs" "${args[@]}"
+    - name: Commit the tree if it changed
+      if: inputs.commit == 'true'
+      shell: bash
+      env:
+        GT_OUT: ${{ inputs.output }}
+        GT_MSG: ${{ inputs.commit-message }}
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add "$GT_OUT"
+        if git diff --cached --quiet; then echo "No change in activity, nothing to commit."; exit 0; fi
+        git commit -m "$GT_MSG"
+        git push || (git pull --rebase && git push)
