@@ -23,7 +23,7 @@ You need a profile repository: a public repo named exactly like your username, w
 
    on:
      schedule:
-       - cron: "8,23,38,53 * * * *" # every 15 minutes; use "17 9 * * *" for once a day
+       - cron: "17 * * * *" # every hour; see "How often it updates" to change this
      workflow_dispatch:
 
    permissions:
@@ -51,6 +51,19 @@ You need a profile repository: a public repo named exactly like your username, w
 
 3. Open the **Actions** tab, pick **Grow GitTree** and press **Run workflow**. The first run commits `assets/tree.svg`. After that the workflow only commits when your tree has changed.
 
+## How often it updates
+
+The `cron` line in your workflow sets the schedule. The example runs once an hour, which keeps the tree current without many runs. To change it, replace that line with one of these:
+
+| Schedule | `cron` line |
+| --- | --- |
+| Every 30 minutes | `- cron: "17,47 * * * *"` |
+| Every hour (example default) | `- cron: "17 * * * *"` |
+| Every 6 hours | `- cron: "17 */6 * * *"` |
+| Once a day | `- cron: "17 9 * * *"` |
+
+Times are UTC. An odd minute like `17` avoids the top of the hour, when GitHub's scheduler is busiest and delays are longest. Because runs only commit when the tree changed, running more often does not add commits for nothing.
+
 ## How to read a tree
 
 | What you see | What it means |
@@ -66,7 +79,7 @@ You need a profile repository: a public repo named exactly like your username, w
 | Grass | The last 371 days, one blade per day. Taller and greener means more contributions that day |
 | Sun | Current streak. With no streak it sits behind a cloud |
 | Wind | Activity in the last 14 days |
-| Season | Today's date, blended gradually through the year |
+| Season | Today's date, blended gradually through the year, for the northern or southern hemisphere |
 
 A tree never shrinks. After a quiet stretch the canopy thins, the grass dries and the sun hides, but the trunk and branches stay.
 
@@ -87,6 +100,7 @@ All inputs are optional.
 | `username` | The repo owner | Whose activity grows the tree |
 | `output` | `assets/tree.svg` | Where the SVG is written |
 | `exclude` | Markup and config languages such as HTML, CSS and Dockerfile | Comma-separated languages that never get a limb. Setting this replaces the default list; `none` excludes nothing |
+| `hemisphere` | `north` | `south` flips the seasons, so December is summer and June is winter |
 | `commit` | `true` | Commit and push the SVG when it changed. Set to `false` to handle the file yourself |
 | `commit-message` | `Grow tree [skip ci]` | Message for that commit |
 | `token` | The workflow's built-in token | Token used to read public activity |
@@ -98,6 +112,7 @@ Example with options:
   with:
     output: images/my-tree.svg
     exclude: "HTML,CSS,Jupyter Notebook"
+    hemisphere: south
 ```
 
 ## How it works
@@ -122,6 +137,7 @@ Useful flags:
 
 - `--save-data data.json` keeps the fetched data, and `--data data.json` renders from it without calling GitHub.
 - `--season-date 2027-01-15` previews another season.
+- `--hemisphere south` uses southern hemisphere seasons.
 - `--date 2026-05-01` draws the tree as it was on that day.
 - `--exclude "HTML,CSS"` sets the languages that never get a limb.
 
@@ -129,7 +145,6 @@ Useful flags:
 
 - **Public activity only.** Private repos and private contributions are not read.
 - **First 100 repos and 100 merged pull requests.** Forks are skipped.
-- **Northern hemisphere seasons.**
 - **Up to six languages get limbs.** Repos in other languages grow on the leader limb and keep their own leaf color.
 - **Schedules are approximate.** GitHub can delay scheduled workflows, and it disables them in public repos after 60 days without repository activity. If your tree stops updating, re-enable the workflow in the Actions tab.
 - **Bot commits don't count as contributions,** so the tree can't grow itself.

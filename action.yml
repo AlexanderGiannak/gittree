@@ -14,6 +14,9 @@ inputs:
   exclude:
     description: Comma-separated languages that never get a limb. Leave empty for the default (markup and config such as HTML and CSS), or "none" to give every language a limb
     default: ""
+  hemisphere:
+    description: Whose seasons the tree follows, "north" or "south"
+    default: north
   commit:
     description: Commit and push the SVG when it changed ("true" or "false")
     default: "true"
@@ -36,8 +39,9 @@ runs:
         GT_USER: ${{ inputs.username }}
         GT_OUT: ${{ inputs.output }}
         GT_EXCLUDE: ${{ inputs.exclude }}
+        GT_HEMISPHERE: ${{ inputs.hemisphere }}
       run: |
-        args=(--user "$GT_USER" --out "$GT_OUT")
+        args=(--user "$GT_USER" --out "$GT_OUT" --hemisphere "${GT_HEMISPHERE:-north}")
         if [ -n "$GT_EXCLUDE" ]; then args+=(--exclude "$GT_EXCLUDE"); fi
         node "$GITHUB_ACTION_PATH/tree.mjs" "${args[@]}"
     - name: Commit the tree if it changed

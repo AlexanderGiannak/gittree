@@ -8,6 +8,7 @@
  *   --save-data file.json     keep the fetched data
  *   --date YYYY-MM-DD         draw the tree as it was on that date
  *   --season-date YYYY-MM-DD  take the season from this date instead (previews)
+ *   --hemisphere north|south  whose seasons to follow (default north)
  *   --exclude "HTML,CSS"      languages that never get a limb (default: markup and config, see EXCLUDE)
  *
  * How the tree is built
@@ -229,7 +230,8 @@ const GRASS = ['#c9bf95', '#9be9a8', '#40c463', '#30a14e', '#216e39'];
 
 function render(data, opts = {}) {
   const asOf = opts.asOf || new Date(), login = data.login || 'you';
-  const m = derive(data, asOf, opts.exclude), S = seasonState(seasonPos(opts.seasonDate || asOf));
+  // the southern hemisphere is half a year out of step: its spring equinox is the northern autumn equinox
+  const m = derive(data, asOf, opts.exclude), S = seasonState((seasonPos(opts.seasonDate || asOf) + (opts.hemisphere === 'south' ? 2 : 0)) % 4);
   const tree = buildTree(m, login), R = rng(hash(login + ':leaves'));
   const out = [], css = [], defs = [];
   const wind = m.last14 === 0 ? 0 : m.last14 < 10 ? 1 : 2, sunX = W - 110, sunY = 66;
@@ -384,7 +386,9 @@ async function main() {
   const seasonDate = typeof opt['season-date'] === 'string' ? day('season-date', opt['season-date']) : undefined;
   // "none" (or a bare --exclude) lets every language grow a limb
   const exclude = typeof opt.exclude === 'string' && opt.exclude.trim().toLowerCase() !== 'none' ? opt.exclude.split(',').map(s => s.trim()).filter(Boolean) : opt.exclude ? [] : undefined;
-  const { svg, metrics } = render(data, { asOf, seasonDate, exclude });
+  const hemisphere = typeof opt.hemisphere === 'string' ? opt.hemisphere.trim().toLowerCase() : 'north';
+  if (!['north', 'south'].includes(hemisphere)) throw new Error(`--hemisphere must be "north" or "south", got "${opt.hemisphere}"`);
+  const { svg, metrics } = render(data, { asOf, seasonDate, exclude, hemisphere });
   const outPath = opt.out || 'assets/tree.svg';
   mkdirSync(dirname(outPath), { recursive: true }); writeFileSync(outPath, svg);
   console.log(`Wrote ${outPath} (${(svg.length / 1024).toFixed(1)} KB)`, JSON.stringify(metrics));
