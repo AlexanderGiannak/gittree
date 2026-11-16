@@ -14,13 +14,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - name: Make a README with stats markers
+        run: |
+          mkdir -p out
+          printf '# Test\n\n<!-- gittree:start -->\n<!-- gittree:end -->\n' > out/README.md
       - name: Run the action against live data without committing
         uses: ./
         with:
           output: out/tree.svg
+          readme: out/README.md
           commit: "false"
       - name: Check the result is an SVG
         run: |
           test -s out/tree.svg
           head -c 200 out/tree.svg | grep -q "<svg"
           ls -l out/tree.svg
+      - name: Check the README stats and language bar
+        run: |
+          grep -q "contributions" out/README.md
+          grep -q 'src="tree-languages.svg"' out/README.md
+          head -c 200 out/tree-languages.svg | grep -q "<svg"
+          cat out/README.md

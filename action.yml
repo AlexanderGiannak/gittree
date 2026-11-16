@@ -17,6 +17,9 @@ inputs:
   hemisphere:
     description: Whose seasons the tree follows, "north" or "south"
     default: north
+  readme:
+    description: README to keep a stats line and language bar in, between <!-- gittree:start --> and <!-- gittree:end --> markers. Leave empty to skip
+    default: ""
   commit:
     description: Commit and push the SVG when it changed ("true" or "false")
     default: "true"
@@ -40,9 +43,11 @@ runs:
         GT_OUT: ${{ inputs.output }}
         GT_EXCLUDE: ${{ inputs.exclude }}
         GT_HEMISPHERE: ${{ inputs.hemisphere }}
+        GT_README: ${{ inputs.readme }}
       run: |
         args=(--user "$GT_USER" --out "$GT_OUT" --hemisphere "${GT_HEMISPHERE:-north}")
         if [ -n "$GT_EXCLUDE" ]; then args+=(--exclude "$GT_EXCLUDE"); fi
+        if [ -n "$GT_README" ]; then args+=(--readme "$GT_README"); fi
         node "$GITHUB_ACTION_PATH/tree.mjs" "${args[@]}"
     - name: Commit the tree if it changed
       if: inputs.commit == 'true'
@@ -50,10 +55,14 @@ runs:
       env:
         GT_OUT: ${{ inputs.output }}
         GT_MSG: ${{ inputs.commit-message }}
+        GT_README: ${{ inputs.readme }}
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-        git add "$GT_OUT"
+        git add -- "$GT_OUT"
+        if [ -n "$GT_README" ]; then
+          for f in "$GT_README" "${GT_OUT%.svg}-languages.svg"; do if [ -e "$f" ]; then git add -- "$f"; fi; done
+        fi
         if git diff --cached --quiet; then echo "No change in activity, nothing to commit."; exit 0; fi
         git commit -m "$GT_MSG"
         git push || (git pull --rebase && git push)

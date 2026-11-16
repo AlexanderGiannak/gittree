@@ -9,6 +9,7 @@
  *   --date YYYY-MM-DD         draw the tree as it was on that date
  *   --season-date YYYY-MM-DD  take the season from this date instead (previews)
  *   --hemisphere north|south  whose seasons to follow (default north)
+ *   --readme README.md        keep a stats line and language bar between <!-- gittree:start --> and <!-- gittree:end -->
  *   --exclude "HTML,CSS"      languages that never get a limb (default: markup and config, see EXCLUDE)
  *
  * How the tree is built
@@ -28,7 +29,7 @@
  *   season ............... today's date, blended gradually through the year
  */
 import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, relative, sep } from 'node:path';
 
 /* ---------------- utils ---------------- */
 const W = 900, H = 340, GY = 300;
@@ -363,8 +364,55 @@ function render(data, opts = {}) {
   const label = `${login}'s GitTree: ${m.total.toLocaleString('en-US')} contributions, ${m.langs.map(l => l.name).join(', ')}; ${seasonName(S.s)}.`;
   return {
     svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}"><title>${esc(label)}</title><style>${css.join('')}</style><defs>${defs.join('')}</defs><g clip-path="url(#frame)">${out.join('')}</g></svg>`,
-    metrics: { total: m.total, activeDays: m.activeDays, streak: m.streak, prs: m.prs, stars: m.stars, repos: m.repoCount, maturity: +tree.M.toFixed(2), trunkGirth: +tree.trunk.w0.toFixed(1), season: seasonName(S.s), seasonPos: +S.s.toFixed(3), limbs: m.langs.map(l => `${l.name} (${l.repos.length} repos, ${(l.share * 100).toFixed(0)}%)`), leaves: (out.join('').match(/href="#[ls]"/g) || []).length }
+    metrics: { total: m.total, activeDays: m.activeDays, streak: m.streak, prs: m.prs, stars: m.stars, repos: m.repoCount, maturity: +tree.M.toFixed(2), trunkGirth: +tree.trunk.w0.toFixed(1), season: seasonName(S.s), seasonPos: +S.s.toFixed(3), limbs: m.langs.map(l => `${l.name} (${l.repos.length} repos, ${(l.share * 100).toFixed(0)}%)`), leaves: (out.join('').match(/href="#[ls]"/g) || []).length },
+    // per-language limb weights for the README legend; repos counts only repos written in that language
+    langs: m.langs.map(l => ({ name: l.name, color: mix(l.color, l.color, 0), share: l.share, repos: l.repos.filter(r => !r.stray).length }))
   };
+}
+
+/* ---------------- README stats: a numbers line plus a language bar coloured like the leaves ---------------- */
+const MARK_START = '<!-- gittree:start -->', MARK_END = '<!-- gittree:end -->';
+const pctLabel = s => s < .005 ? '<1%' : `${Math.round(s * 100)}%`;
+const legendAlt = langs => `Limbs by language: ${langs.map(l => `${l.name} ${pctLabel(l.share)}`).join(', ')}`;
+
+function legendSvg(langs) {
+  const LW = 900, fs = 13, gap = 28, rowH = 24, padX = 4, barY = 30, barH = 10;
+  // text width is estimated (no layout engine in an image); generous per-character widths keep rows from overflowing
+  const items = langs.map(l => { const meta = ` ${pctLabel(l.share)} · ${l.repos} repo${l.repos === 1 ? '' : 's'}`; return { ...l, meta, w: 16 + l.name.length * 8 + meta.length * 7 } });
+  const rows = [[]]; let rw = 0;
+  for (const it of items) { if (rows.at(-1).length && rw + gap + it.w > LW - 2 * padX) { rows.push([]); rw = 0 } rw += (rows.at(-1).length ? gap : 0) + it.w; rows.at(-1).push(it) }
+  let x = padX; const segs = items.map((it, i) => { const w = i === items.length - 1 ? LW - padX - x : Math.max(3, (LW - 2 * padX) * it.share); const s = `<rect x="${f1(x)}" y="${barY}" width="${f1(Math.max(0, w))}" height="${barH}" fill="${it.color}"/>`; x += w; return s }).join('');
+  const legend = rows.map((row, ri) => {
+    const total = row.reduce((s, it) => s + it.w, 0) + gap * (row.length - 1); let cx = (LW - total) / 2; const y = barY + barH + 26 + ri * rowH;
+    return row.map(it => { const s = `<circle cx="${f1(cx + 6)}" cy="${y - 4.5}" r="5" fill="${it.color}"/><text x="${f1(cx + 16)}" y="${y}" font-size="${fs}"><tspan class="t" font-weight="600">${esc(it.name)}</tspan><tspan class="m">${esc(it.meta)}</tspan></text>`; cx += it.w + gap; return s }).join('');
+  }).join('');
+  const LH = barY + barH + 26 + (rows.length - 1) * rowH + 10, alt = legendAlt(langs);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${LW}" height="${LH}" viewBox="0 0 ${LW} ${LH}" role="img" aria-label="${esc(alt)}"><title>${esc(alt)}</title>`
+    + `<style>text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}.t{fill:#6e7781}.m,.h{fill:#848d97}</style>`
+    + `<text class="h" x="${LW / 2}" y="16" font-size="11" text-anchor="middle" letter-spacing="1.2">LIMBS BY LANGUAGE · SIZED HALF BY REPOS, HALF BY CODE</text>`
+    + `<clipPath id="bar"><rect x="${padX}" y="${barY}" width="${LW - 2 * padX}" height="${barH}" rx="${barH / 2}"/></clipPath><g clip-path="url(#bar)">${segs}</g>${legend}</svg>`;
+}
+
+function readmeBlock(metrics, legendSrc, alt) {
+  const n = v => v.toLocaleString('en-US'), season = metrics.season;
+  const streak = metrics.streak ? `🔥 <b>${n(metrics.streak)}</b>-day streak` : '☁️ no streak right now';
+  const parts = [`<b>${n(metrics.total)}</b> contributions`, `<b>${n(metrics.activeDays)}</b> active days`, streak,
+    `<b>${n(metrics.prs)}</b> PR${metrics.prs === 1 ? '' : 's'} merged this year`, `⭐ <b>${n(metrics.stars)}</b> star${metrics.stars === 1 ? '' : 's'}`,
+    `${{ spring: '🌸', summer: '☀️', autumn: '🍂', winter: '❄️' }[season]} ${season}`];
+  return `${MARK_START}\n<p align="center">${parts.join(' · ')}</p>\n<p align="center"><img src="${legendSrc}" width="100%" alt="${esc(alt)}"></p>\n${MARK_END}`;
+}
+
+// rewrites only the part of the README between the markers; returns false (and changes nothing) if they are missing
+function updateReadme(readmePath, outPath, result) {
+  const text = readFileSync(readmePath, 'utf8'), a = text.indexOf(MARK_START), b = text.indexOf(MARK_END);
+  if (a < 0 || b < a) { console.warn(`${readmePath}: no ${MARK_START} … ${MARK_END} markers, so the stats were not added. Put both where the stats should go.`); return false }
+  const legendPath = outPath.replace(/\.svg$/i, '') + '-languages.svg', svg = legendSvg(result.langs);
+  writeFileSync(legendPath, svg);
+  const src = relative(dirname(readmePath), legendPath).split(sep).join('/'), alt = legendAlt(result.langs);
+  const next = text.slice(0, a) + readmeBlock(result.metrics, src, alt) + text.slice(b + MARK_END.length);
+  if (next !== text) writeFileSync(readmePath, next);
+  console.log(`Updated stats in ${readmePath} and wrote ${legendPath}`);
+  return true;
 }
 
 /* ---------------- main ---------------- */
@@ -388,10 +436,11 @@ async function main() {
   const exclude = typeof opt.exclude === 'string' && opt.exclude.trim().toLowerCase() !== 'none' ? opt.exclude.split(',').map(s => s.trim()).filter(Boolean) : opt.exclude ? [] : undefined;
   const hemisphere = typeof opt.hemisphere === 'string' ? opt.hemisphere.trim().toLowerCase() : 'north';
   if (!['north', 'south'].includes(hemisphere)) throw new Error(`--hemisphere must be "north" or "south", got "${opt.hemisphere}"`);
-  const { svg, metrics } = render(data, { asOf, seasonDate, exclude, hemisphere });
+  const result = render(data, { asOf, seasonDate, exclude, hemisphere }), { svg, metrics } = result;
   const outPath = opt.out || 'assets/tree.svg';
   mkdirSync(dirname(outPath), { recursive: true }); writeFileSync(outPath, svg);
   console.log(`Wrote ${outPath} (${(svg.length / 1024).toFixed(1)} KB)`, JSON.stringify(metrics));
+  if (typeof opt.readme === 'string') updateReadme(opt.readme, outPath, result);
 }
 const isMain = typeof process !== 'undefined' && process.argv[1] && (import.meta.url === new URL(process.argv[1], 'file://').href || process.argv[1].endsWith('tree.mjs'));
 if (isMain) main().catch(e => { console.error(e.message); process.exit(1) });

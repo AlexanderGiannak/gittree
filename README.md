@@ -101,6 +101,7 @@ All inputs are optional.
 | `output` | `assets/tree.svg` | Where the SVG is written |
 | `exclude` | Markup and config languages such as HTML, CSS and Dockerfile | Comma-separated languages that never get a limb. Setting this replaces the default list; `none` excludes nothing |
 | `hemisphere` | `north` | `south` flips the seasons, so December is summer and June is winter |
+| `readme` | Off | Path of a README to keep a stats line and language bar in. See [Show the numbers behind the tree](#show-the-numbers-behind-the-tree) |
 | `commit` | `true` | Commit and push the SVG when it changed. Set to `false` to handle the file yourself |
 | `commit-message` | `Grow tree [skip ci]` | Message for that commit |
 | `token` | The workflow's built-in token | Token used to read public activity |
@@ -114,6 +115,31 @@ Example with options:
     exclude: "HTML,CSS,Jupyter Notebook"
     hemisphere: south
 ```
+
+## Show the numbers behind the tree
+
+Visitors may not realize the tree is data. GitTree can keep a short stats line and a language bar in your README, updated on every run:
+
+<p align="center"><b>337</b> contributions · <b>73</b> active days · 🔥 <b>1</b>-day streak · <b>26</b> PRs merged this year · ⭐ <b>2</b> stars · 🍂 autumn</p>
+
+The language bar is a second small SVG written next to the tree (`assets/tree-languages.svg`). It shows each limb's language and weight, colored the same as that limb's leaves.
+
+1. Put these two markers in your `README.md` where the stats should go, usually right under the tree:
+
+   ```html
+   <!-- gittree:start -->
+   <!-- gittree:end -->
+   ```
+
+2. Turn it on in your workflow:
+
+   ```yaml
+   - uses: AlexanderGiannak/gittree@v1
+     with:
+       readme: README.md
+   ```
+
+GitTree only rewrites what is between the markers, and only commits when the numbers change. If the markers are missing, it leaves the README alone and says so in the log.
 
 ## How it works
 
@@ -138,6 +164,7 @@ Useful flags:
 - `--save-data data.json` keeps the fetched data, and `--data data.json` renders from it without calling GitHub.
 - `--season-date 2027-01-15` previews another season.
 - `--hemisphere south` uses southern hemisphere seasons.
+- `--readme README.md` updates the stats between the markers and writes the language bar.
 - `--date 2026-05-01` draws the tree as it was on that day.
 - `--exclude "HTML,CSS"` sets the languages that never get a limb.
 
